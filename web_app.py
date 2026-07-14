@@ -3,14 +3,16 @@ import os
 import re
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import HTMLResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from file_processor import (
+    TableData,
     is_tiktok_url,
     parse_upload,
     results_to_link_table,
@@ -18,6 +20,7 @@ from file_processor import (
     urls_from_table,
 )
 from tiktok_stats import DEFAULT_BROWSER, fetch_many_video_data
+from telegram_notifier import UsageReport, send_usage_notification
 
 
 app = FastAPI(title="TikTok Stats Internal Tool")
@@ -27,10 +30,25 @@ PREVIEW_TTL_SECONDS = 15 * 60
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
-def require_auth(credentials: HTTPBasicCredentials | None = Depends(security)) -> None:
+@dataclass
+class ProcessResult:
+    table: TableData
+    report: UsageReport
+
+
+@dataclass
+class FileProcessResult:
+    table: TableData
+    output: bytes
+    output_name: str
+    media_type: str
+    report: UsageReport
+
+
+def require_auth(credentials: HTTPBasicCredentials | None = Depends(security)) -> str:
     password = os.getenv("INTERNAL_TOOL_PASSWORD")
     if not password:
-        return
+        return "anonymous"
 
     username = os.getenv("INTERNAL_TOOL_USER", "admin")
     if credentials is None:
@@ -40,6 +58,7 @@ def require_auth(credentials: HTTPBasicCredentials | None = Depends(security)) -
     valid_password = hmac.compare_digest(credentials.password, password)
     if not (valid_user and valid_password):
         raise_auth_error()
+    return credentials.username
 
 
 def raise_auth_error() -> None:
@@ -776,20 +795,30 @@ async def index() -> str:
 </html>"""
 
 
-@app.post("/process-links", dependencies=[Depends(require_auth)])
-async def process_links(links: str = Form(...)) -> Response:
-    table = await build_link_table(links)
-    return file_download(table_to_xlsx(table), export_filename("xlsx"), XLSX_MEDIA_TYPE)
+@app.post("/process-links")
+async def process_links(
+    background_tasks: BackgroundTasks,
+    links: str = Form(...),
+    actor: str = Depends(require_auth),
+) -> Response:
+    result = await build_link_table(links, actor=actor)
+    background_tasks.add_task(send_usage_notification, result.report)
+    return file_download(table_to_xlsx(result.table), export_filename("xlsx"), XLSX_MEDIA_TYPE)
 
 
-@app.post("/preview-links", dependencies=[Depends(require_auth)])
-async def preview_links(links: str = Form(...)) -> dict[str, object]:
-    table = await build_link_table(links)
-    xlsx_content = table_to_xlsx(table)
+@app.post("/preview-links")
+async def preview_links(
+    background_tasks: BackgroundTasks,
+    links: str = Form(...),
+    actor: str = Depends(require_auth),
+) -> dict[str, object]:
+    result = await build_link_table(links, actor=actor)
+    background_tasks.add_task(send_usage_notification, result.report)
+    xlsx_content = table_to_xlsx(result.table)
     filename = export_filename("xlsx")
     return {
-        "headers": table.headers,
-        "rows": table.rows,
+        "headers": result.table.headers,
+        "rows": result.table.rows,
         "preview_id": remember_preview(xlsx_content, filename, XLSX_MEDIA_TYPE),
         "filename": filename,
     }
@@ -804,18 +833,23 @@ async def download_preview(preview_id: str) -> Response:
     return file_download(content, filename, media_type)
 
 
-@app.post("/preview-file", dependencies=[Depends(require_auth)])
-async def preview_file(file: UploadFile = File(...)) -> dict[str, object]:
-    enriched, output, output_name, media_type = await build_file_output(file)
+@app.post("/preview-file")
+async def preview_file(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    actor: str = Depends(require_auth),
+) -> dict[str, object]:
+    result = await build_file_output(file, actor=actor)
+    background_tasks.add_task(send_usage_notification, result.report)
     return {
-        "headers": enriched.headers,
-        "rows": enriched.rows,
-        "preview_id": remember_preview(output, output_name, media_type),
-        "filename": output_name,
+        "headers": result.table.headers,
+        "rows": result.table.rows,
+        "preview_id": remember_preview(result.output, result.output_name, result.media_type),
+        "filename": result.output_name,
     }
 
 
-async def build_link_table(links: str):
+async def build_link_table(links: str, *, actor: str) -> ProcessResult:
     urls = split_links(links)
     max_rows = int(os.getenv("MAX_BATCH_ROWS", "100"))
     if not urls:
@@ -828,10 +862,19 @@ async def build_link_table(links: str):
         raise HTTPException(status_code=400, detail=f"Link không hợp lệ: {invalid_urls[0]}")
 
     results = await fetch_many_video_data(urls, browser=DEFAULT_BROWSER, headless=True)
-    return results_to_link_table(urls, results)
+    return ProcessResult(
+        table=results_to_link_table(urls, results),
+        report=build_usage_report(
+            actor=actor,
+            action="Dán link",
+            urls=urls,
+            results=results,
+            source="Pasted links",
+        ),
+    )
 
 
-async def build_file_output(file: UploadFile):
+async def build_file_output(file: UploadFile, *, actor: str) -> FileProcessResult:
     filename = file.filename or "input.csv"
     content = await file.read()
     max_upload_mb = int(os.getenv("MAX_UPLOAD_MB", "10"))
@@ -848,6 +891,13 @@ async def build_file_output(file: UploadFile):
             raise ValueError("Không tìm thấy link TikTok hợp lệ trong file.")
         results = await fetch_many_video_data(urls, browser=DEFAULT_BROWSER, headless=True)
         output_table = results_to_link_table(urls, results)
+        report = build_usage_report(
+            actor=actor,
+            action="Tải file",
+            urls=urls,
+            results=results,
+            source=filename,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -859,10 +909,36 @@ async def build_file_output(file: UploadFile):
     output = table_to_xlsx(output_table)
     media_type = XLSX_MEDIA_TYPE
     output_name = export_filename("xlsx")
-    return output_table, output, output_name, media_type
+    return FileProcessResult(output_table, output, output_name, media_type, report)
 
 
-@app.post("/process", dependencies=[Depends(require_auth)])
-async def process_file(file: UploadFile = File(...)) -> Response:
-    _, output, output_name, media_type = await build_file_output(file)
-    return file_download(output, output_name, media_type)
+@app.post("/process")
+async def process_file(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    actor: str = Depends(require_auth),
+) -> Response:
+    result = await build_file_output(file, actor=actor)
+    background_tasks.add_task(send_usage_notification, result.report)
+    return file_download(result.output, result.output_name, result.media_type)
+
+
+def build_usage_report(
+    *,
+    actor: str,
+    action: str,
+    urls: list[str],
+    results: list[dict[str, object]],
+    source: str | None = None,
+) -> UsageReport:
+    errors = [str(result.get("error")) for result in results if result.get("error")]
+    error_count = len(errors)
+    return UsageReport(
+        user=actor,
+        action=action,
+        source=source,
+        total_records=len(urls),
+        success_records=max(len(urls) - error_count, 0),
+        error_records=error_count,
+        errors=errors,
+    )

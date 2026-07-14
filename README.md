@@ -62,9 +62,16 @@ export INTERNAL_TOOL_USER="admin"
 export INTERNAL_TOOL_PASSWORD="change-me"
 export MAX_BATCH_ROWS="100"
 export MAX_UPLOAD_MB="10"
+export APP_PUBLIC_URL="https://tik-crawler.minhat.online"
+export TELEGRAM_BOT_TOKEN="123456:bot-token"
+export TELEGRAM_CHAT_ID="-1001234567890"
+export TELEGRAM_TIMEOUT_SECONDS="5"
 ```
 
 `MS_TOKEN` is optional, but TikTok scraping is usually more reliable with it.
+
+Telegram notifications are optional. If `TELEGRAM_BOT_TOKEN` or `TELEGRAM_CHAT_ID`
+is missing, the app skips notifications and continues processing normally.
 
 ## CLI
 
