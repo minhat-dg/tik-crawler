@@ -98,17 +98,21 @@ async def index() -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TikTok Stats</title>
+  <title>Tik Crawler</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23111827'/%3E%3Cpath d='M18 19h28v8H36v20h-8V27H18z' fill='%23ffffff'/%3E%3Cpath d='M43 17h7v7h-7z' fill='%230f766e'/%3E%3Cpath d='M14 40h8v8h-8z' fill='%23e11d48'/%3E%3C/svg%3E">
   <style>
     :root {
       color-scheme: light;
-      --bg: #f7f8fa;
+      --bg: #f4f6f8;
       --panel: #ffffff;
-      --text: #17202a;
-      --muted: #5d6673;
-      --line: #d8dde5;
+      --text: #111827;
+      --muted: #667085;
+      --line: #d6dbe3;
       --accent: #0f766e;
-      --accent-strong: #115e59;
+      --accent-strong: #0b5f59;
+      --accent-soft: #ecfdf5;
+      --danger: #e11d48;
+      --ink: #111827;
     }
     * { box-sizing: border-box; }
     body {
@@ -119,24 +123,61 @@ async def index() -> str:
       font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
     main {
-      width: min(920px, calc(100vw - 32px));
-      margin: 40px auto;
+      width: min(1040px, calc(100vw - 32px));
+      margin: 32px auto 22px;
+    }
+    .app-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--line);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-width: 0;
+    }
+    .brand-mark {
+      width: 48px;
+      height: 48px;
+      flex: 0 0 auto;
+    }
+    .brand-copy {
+      min-width: 0;
     }
     h1 {
       margin: 0 0 8px;
-      font-size: 28px;
+      font-size: 30px;
       font-weight: 700;
       letter-spacing: 0;
     }
     p { margin: 0; color: var(--muted); }
+    .app-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--accent);
+      box-shadow: 0 0 0 3px rgb(15 118 110 / 0.14);
+    }
     .mode-switch {
       display: inline-flex;
       gap: 4px;
-      margin-top: 24px;
+      margin-top: 26px;
       padding: 4px;
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: #eef2f6;
+      background: #e8edf3;
     }
     .mode {
       min-height: 36px;
@@ -161,8 +202,8 @@ async def index() -> str:
       background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 8px;
-      padding: 24px;
-      box-shadow: 0 1px 2px rgb(16 24 40 / 0.04);
+      padding: 26px;
+      box-shadow: 0 8px 24px rgb(16 24 40 / 0.06);
     }
     form.active { display: block; }
     label {
@@ -178,6 +219,15 @@ async def index() -> str:
       background: #fff;
       padding: 10px 12px;
       font: inherit;
+    }
+    textarea:focus,
+    input[type="file"]:focus-visible,
+    .primary:focus-visible,
+    .secondary:focus-visible,
+    .mode:focus-visible,
+    .icon-button:focus-visible {
+      outline: 3px solid rgb(15 118 110 / 0.18);
+      outline-offset: 2px;
     }
     textarea {
       min-height: 180px;
@@ -204,7 +254,7 @@ async def index() -> str:
     .dropzone:hover,
     .dropzone.dragover {
       border-color: var(--accent);
-      background: #f0fdfa;
+      background: var(--accent-soft);
       box-shadow: 0 0 0 3px rgb(15 118 110 / 0.12);
     }
     .dropzone strong {
@@ -247,6 +297,7 @@ async def index() -> str:
     .primary:hover { background: var(--accent-strong); }
     .primary:disabled { cursor: wait; opacity: 0.7; }
     .status { color: var(--muted); min-height: 22px; }
+    .status:not(:empty) { font-weight: 600; }
     .modal {
       position: fixed;
       inset: 0;
@@ -290,7 +341,7 @@ async def index() -> str:
       min-height: 36px;
       border: 0;
       border-radius: 6px;
-      background: #eef2f6;
+      background: #e8edf3;
       color: var(--text);
       font-size: 24px;
       line-height: 1;
@@ -340,6 +391,7 @@ async def index() -> str:
       font-weight: 700;
       cursor: pointer;
     }
+    .secondary:hover { background: #f8fafc; }
     .processing-card {
       width: min(420px, calc(100vw - 32px));
       margin: 18vh auto 0;
@@ -361,11 +413,70 @@ async def index() -> str:
       font-size: 20px;
       letter-spacing: 0;
     }
+    .app-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-top: 18px;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      color: var(--muted);
+      font-size: 12px;
+      box-shadow: 0 1px 2px rgb(16 24 40 / 0.04);
+    }
+    .footer-brand {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
+    .footer-title {
+      color: var(--text);
+      font-weight: 700;
+    }
+    .footer-meta {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .footer-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 26px;
+      padding: 0 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #f8fafc;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .footer-link {
+      color: var(--accent-strong);
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .footer-link:hover { text-decoration: underline; }
     @keyframes spin {
       to { transform: rotate(360deg); }
     }
     @media (max-width: 720px) {
       main { margin: 24px auto; }
+      .app-header,
+      .app-footer {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+      .footer-meta {
+        align-items: flex-start;
+        justify-content: flex-start;
+      }
+      .app-meta { white-space: normal; }
       form { padding: 18px; }
       .modal-card { margin: 16px auto; max-height: calc(100vh - 32px); }
     }
@@ -373,8 +484,24 @@ async def index() -> str:
 </head>
 <body>
   <main>
-    <h1>TikTok Stats</h1>
-    <p>Dán link TikTok hoặc tải file để xuất file thống kê.</p>
+    <header class="app-header">
+      <div class="brand">
+        <svg class="brand-mark" viewBox="0 0 64 64" role="img" aria-label="Tik Crawler">
+          <rect width="64" height="64" rx="14" fill="#111827"></rect>
+          <path d="M18 19h28v8H36v20h-8V27H18z" fill="#ffffff"></path>
+          <rect x="43" y="17" width="7" height="7" fill="#0f766e"></rect>
+          <rect x="14" y="40" width="8" height="8" fill="#e11d48"></rect>
+        </svg>
+        <div class="brand-copy">
+          <h1>Tik Crawler</h1>
+          <p>Công cụ nội bộ để lấy số liệu video TikTok và xuất file thống kê.</p>
+        </div>
+      </div>
+      <div class="app-meta" aria-label="Trạng thái hệ thống">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span>Internal tool</span>
+      </div>
+    </header>
 
     <div class="mode-switch" role="tablist" aria-label="Chọn cách nhập">
       <button class="mode active" type="button" data-panel="paste-form">Dán link</button>
@@ -384,7 +511,7 @@ async def index() -> str:
     <form id="paste-form" class="active" action="/preview-links" method="post">
       <label for="links">Danh sách link TikTok</label>
       <textarea id="links" name="links" placeholder="Mỗi dòng một link, hoặc ngăn cách bằng dấu phẩy" required></textarea>
-      <div class="hint">File xuất ra gồm các cột: Url, Caption, View, Like, Comment, Share, Save.</div>
+      <div class="hint">File xuất gồm các cột: Url, Caption, View, Like, Comment, Share, Save.</div>
       <div class="actions">
         <button id="paste-submit" class="primary" type="submit">Lấy số liệu</button>
         <span id="paste-status" class="status"></span>
@@ -395,7 +522,7 @@ async def index() -> str:
       <label for="file">File dữ liệu</label>
       <label id="dropzone" class="dropzone" for="file">
         <strong>Chọn file hoặc kéo thả vào đây</strong>
-        <span>Hỗ trợ file danh sách link TikTok</span>
+        <span>Hỗ trợ file .csv, .xlsx, .xlsm chứa danh sách link TikTok</span>
         <div id="file-name" class="file-name">Chưa chọn file</div>
       </label>
       <input id="file" class="file-input" name="file" type="file" accept=".csv,.xlsx,.xlsm" required>
@@ -411,7 +538,7 @@ async def index() -> str:
       <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="preview-title">
         <div class="modal-header">
           <div>
-            <h2 id="preview-title">Preview file xuất</h2>
+            <h2 id="preview-title">Xem trước file xuất</h2>
             <p id="preview-subtitle"></p>
           </div>
           <button id="close-preview" class="icon-button" type="button" aria-label="Đóng">×</button>
@@ -437,6 +564,20 @@ async def index() -> str:
         <p>Vui lòng giữ nguyên tab này trong khi hệ thống lấy số liệu TikTok.</p>
       </section>
     </div>
+
+    <footer class="app-footer">
+      <div class="footer-brand">
+        <span class="footer-title">Tik Crawler</span>
+        <span>© 2026 Minh Nhat Le. Internal use only.</span>
+      </div>
+      <div class="footer-meta">
+        <span class="footer-pill">
+          <span class="status-dot" aria-hidden="true"></span>
+          Private workspace
+        </span>
+        <a class="footer-link" href="https://tik-crawler.minhat.online">tik-crawler.minhat.online</a>
+      </div>
+    </footer>
   </main>
 
   <script>
@@ -513,7 +654,7 @@ async def index() -> str:
       previewId = payload.preview_id || "";
       previewFilename = payload.filename || "";
       exportButton.textContent = "Xuất file";
-      previewSubtitle.textContent = rows.length + " dòng đã xử lý. Kiểm tra nhanh rồi bấm Export để tải file.";
+      previewSubtitle.textContent = rows.length + " dòng đã xử lý. Kiểm tra nhanh rồi bấm Xuất file để tải về.";
       previewHead.innerHTML = "<tr>" + headers.map((header) => "<th>" + escapeHtml(header) + "</th>").join("") + "</tr>";
       previewBody.innerHTML = rows.slice(0, 50).map((row) =>
         "<tr>" + headers.map((_, index) => "<td>" + escapeHtml(row[index]) + "</td>").join("") + "</tr>"
@@ -527,7 +668,7 @@ async def index() -> str:
       previewModal.setAttribute("aria-hidden", "true");
     }
 
-    function downloadCsv() {
+    function downloadFile() {
       if (!previewId) return;
       window.location.href = "/download-preview/" + encodeURIComponent(previewId);
     }
@@ -626,7 +767,7 @@ async def index() -> str:
 
     closePreview.addEventListener("click", hidePreview);
     cancelExport.addEventListener("click", hidePreview);
-    exportButton.addEventListener("click", downloadCsv);
+    exportButton.addEventListener("click", downloadFile);
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") hidePreview();
     });
