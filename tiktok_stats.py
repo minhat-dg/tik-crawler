@@ -1,4 +1,5 @@
 import asyncio
+import errno
 import os
 from datetime import datetime, timezone
 from typing import Any
@@ -7,6 +8,14 @@ from TikTokApi import TikTokApi
 
 
 DEFAULT_BROWSER = "chromium"
+CHROMIUM_ARGS = [
+    "--mute-audio",
+    "--autoplay-policy=user-gesture-required",
+    "--disable-crash-reporter",
+    "--disable-crashpad",
+    "--disable-dev-shm-usage",
+    "--no-first-run",
+]
 
 
 def to_int(value: Any) -> int | None:
@@ -77,13 +86,14 @@ async def fetch_many_video_data(
 ) -> list[dict[str, Any]]:
     ms_token = os.getenv("ms_token") or os.getenv("MS_TOKEN")
     results: list[dict[str, Any]] = []
-    browser_args = ["--mute-audio"] if browser == "chromium" else None
+    browser_args = CHROMIUM_ARGS.copy() if browser == "chromium" else None
     launch_headless = headless
     if browser == "chromium" and headless:
-        browser_args = ["--headless=new", "--mute-audio"]
+        browser_args = ["--headless=new", *CHROMIUM_ARGS]
         launch_headless = False
 
-    async with TikTokApi() as api:
+    api = TikTokApi()
+    try:
         try:
             await api.create_sessions(
                 ms_tokens=[ms_token] if ms_token else None,
@@ -131,4 +141,40 @@ async def fetch_many_video_data(
                     }
                 )
 
-    return results
+        return results
+    finally:
+        await close_tiktok_api(api)
+
+
+async def close_tiktok_api(api: TikTokApi) -> None:
+    try:
+        await api.close_sessions()
+    except Exception:
+        try:
+            await api.stop_playwright()
+        except Exception:
+            pass
+    finally:
+        reap_child_processes()
+
+
+def reap_child_processes() -> int:
+    if os.name != "posix":
+        return 0
+
+    reaped = 0
+    while True:
+        try:
+            pid, _ = os.waitpid(-1, os.WNOHANG)
+        except ChildProcessError:
+            break
+        except OSError as exc:
+            if exc.errno == errno.ECHILD:
+                break
+            raise
+
+        if pid == 0:
+            break
+        reaped += 1
+
+    return reaped

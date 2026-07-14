@@ -7,11 +7,15 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install -r requirements.txt \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tini \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install -r requirements.txt \
     && python -m playwright install --with-deps chromium
 
 COPY . .
 
 EXPOSE 8000
 
+ENTRYPOINT ["tini", "--"]
 CMD ["uvicorn", "web_app:app", "--host", "0.0.0.0", "--port", "8000"]
